@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPA下载工具</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4CAF50">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="images/icon-192x192.png">
+    <link rel="icon" type="image/png" href="images/icon-32x32.png" sizes="32x32">
+    <link rel="icon" type="image/png" href="images/icon-16x16.png" sizes="16x16">
+</head>
+<body>
+    <header>
+        <h1>IPA下载工具</h1>
+    </header>
+    
+    <main>
+        <!-- 账号管理页 -->
+        <div id="accountsPage" class="page">
+            <div class="page-header">
+                <h2>账号管理</h2>
+                <button id="backToMainFromAccounts" class="button secondary-button">返回</button>
+            </div>
+            
+            <div id="accountList" class="account-list-container">
+                <!-- 账号列表将通过JavaScript填充 -->
+            </div>
+            
+            <div class="page-actions">
+                <button id="addAccountBtn" class="button primary-button">添加账号</button>
+            </div>
+        </div>
+        
+        <!-- 登录页 -->
+        <div id="loginPage" class="page">
+            <div class="page-header">
+                <h2>账号登录</h2>
+                <button id="backToAccountsFromLogin" class="button secondary-button">返回</button>
+            </div>
+            
+            <div class="form-container">
+                <div class="form-group">
+                    <label for="appleId">Apple ID</label>
+                    <input type="email" id="appleId" placeholder="输入您的Apple ID">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">密码</label>
+                    <input type="password" id="password" placeholder="输入您的密码">
+                </div>
+                
+                <div id="verificationCodeContainer" class="form-group hidden">
+                    <label for="verificationCode">验证码</label>
+                    <input type="text" id="verificationCode" placeholder="输入发送到您设备的验证码">
+                    <p class="helper-text">请查看您的Apple设备上收到的验证码</p>
+                </div>
+                
+                <div id="loginMessage" class="login-message"></div>
+                
+                <div class="form-actions">
+                    <button id="loginBtn" class="button primary-button">登录</button>
+                    <button id="submitVerificationBtn" class="button primary-button hidden">验证</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 主下载页 -->
+        <div id="downloadPage" class="page active">
+            <div class="page-header">
+                <h2>下载应用</h2>
+                <button id="accountsBtn" class="button secondary-button">账号管理</button>
+            </div>
+            
+            <div id="currentAccount" class="current-account">
+                <p>当前未登录账号</p>
+            </div>
+            
+            <div class="form-container">
+                <div class="form-group">
+                    <label for="appId">应用ID</label>
+                    <div class="input-with-action">
+                        <input type="text" id="appId" placeholder="输入应用ID (例如: 414478124)">
+                        <button id="searchAppIconBtn" class="icon-button">🔍</button>
+                    </div>
+                    <p class="helper-text">Apple App Store中的应用ID</p>
+                </div>
+                
+                <div class="form-actions">
+                    <button id="searchAppBtn" class="button primary-button">查询应用版本</button>
+                </div>
+                
+                <div id="appInfoContainer" class="hidden">
+                    <div class="app-info-card">
+                        <h3 id="appNameInfo">应用名称</h3>
+                        <div id="appVersionSelector" class="form-group">
+                            <label for="versionSelect">选择版本</label>
+                            <select id="versionSelect">
+                                <!-- 版本选项将通过JavaScript填充 -->
+                            </select>
+                        </div>
+                        <div id="appInfo" class="app-details">
+                            <!-- 应用详情将通过JavaScript填充 -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 新增版本列表容器 -->
+                <div id="appVersionsContainer" class="hidden app-versions-container">
+                    <!-- 版本列表将通过app-versions.js填充 -->
+                </div>
+                
+                <div class="form-group">
+                    <label for="appVerId">版本ID (可选)</label>
+                    <input type="text" id="appVerId" placeholder="输入特定版本ID (留空则下载最新版)">
+                    <p class="helper-text">填写后将尝试下载指定版本，不保证成功</p>
+                </div>
+                
+                <div class="form-actions">
+                    <button id="downloadBtn" class="button primary-button" disabled>下载</button>
+                </div>
+            </div>
+            
+            <div id="downloadProgress" class="progress-container hidden">
+                <h3>下载进度</h3>
+                <div class="progress-bar-container">
+                    <div id="progressBar" class="progress-bar"></div>
+                </div>
+                <p id="progressText" class="progress-text">准备下载...</p>
+            </div>
+            
+            <div id="downloadResult" class="result-container hidden">
+                <h3>下载完成</h3>
+                <p id="appNameResult"></p>
+                <p id="versionResult"></p>
+                <p id="fileSizeResult"></p>
+                <a id="downloadLink" class="button download-button" download>下载IPA文件</a>
+                <p class="helper-text">注意：在iOS设备上，请使用"文件"应用存储下载的IPA</p>
+            </div>
+            
+            <div id="downloadError" class="error-container hidden"></div>
+        </div>
+    </main>
+    
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <footer>
+        <p>© 2023 IPA下载工具 | <a href="https://github.com/beerpiss/ipatool.ts" target="_blank">基于ipatool.ts</a></p>
+    </footer>
+    
+    <script src="js/app.js"></script>
+    <script src="js/app-versions.js"></script>
+</body>
+</html>

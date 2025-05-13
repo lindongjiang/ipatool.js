@@ -49,99 +49,150 @@ async function clearCache(cacheDir) {
 }
 
 export class IPATool {
-    async downipa({ path: downloadPath, APPLE_ID, PASSWORD, CODE, APPID, appVerId } = {}) {
+    async downipa({ path: downloadPath, APPLE_ID, PASSWORD, CODE, APPID, appVerId, onError } = {}) {
         downloadPath = downloadPath || '.'
+        
+        // 定义错误回调函数，如果未提供则默认打印到控制台
+        const handleError = onError || ((errorType, message) => {
+            console.error(`错误类型: ${errorType}`);
+            console.error(`错误信息: ${message}`);
+            return false; // 默认不继续执行
+        });
 
         console.log('------准备登录------');
+        console.log(`IPATool收到的参数 - APPID: ${APPID}, appVerId: ${appVerId || '未指定'}`);
 
-        const user = await Store.authenticate(APPLE_ID, PASSWORD, CODE);
-        if (user._state !== 'success') {
-            console.log(`登录失败：${user.customerMessage}`);
-            return;
+        try {
+            const user = await Store.authenticate(APPLE_ID, PASSWORD, CODE);
+            if (user._state !== 'success') {
+                return handleError('AUTH_FAILED', `登录失败：${user.customerMessage}`);
+            }
+            console.log(`登录结果: ${user.accountInfo.address.firstName} ${user.accountInfo.address.lastName}`);
+
+            console.log('------查询APP信息------');
+            console.log(`准备向Apple发送请求 - APPID: ${APPID}, appVerId: ${appVerId || '未指定（将下载最新版本）'}`);
+            
+            const app = await Store.download(APPID, appVerId, user);
+            if (app._state !== 'success') {
+                // 特殊处理版本不存在的情况
+                if (app.customerMessage && app.customerMessage.includes('version')) {
+                    return handleError('VERSION_NOT_AVAILABLE', 
+                        `请求的版本无法下载。原因：${app.customerMessage}。建议尝试下载最新版本或其他可用版本。`);
+                }
+                return handleError('APP_QUERY_FAILED', `查询失败：${app.customerMessage}`);
+            }
+
+            const songList0 = app?.songList[0];
+            if (!songList0) {
+                return handleError('APP_DATA_MISSING', '无法获取应用信息，请确认账号曾经购买过此应用。');
+            }
+            
+            // 从增强的_extractedInfo字段获取信息
+            const extractedInfo = app._extractedInfo || {};
+            const songMetadata = songList0.metadata || {};
+            
+            const appName = extractedInfo.appName || songMetadata.bundleDisplayName;
+            const version = extractedInfo.version || songMetadata.bundleShortVersionString;
+            const versionId = extractedInfo.versionId || songMetadata.externalVersionId;
+            
+            console.log(`APP名称： ${appName}   版本： ${version}`);
+            
+            // 检查返回的应用是否包含版本ID
+            if (versionId) {
+                console.log(`应用实际版本ID: ${versionId}`);
+                if (appVerId && appVerId !== versionId) {
+                    console.log(`警告: 返回的版本ID与请求的不匹配! 请求: ${appVerId}, 返回: ${versionId}`);
+                    console.log('可能是请求的版本不存在，已自动返回其他可用版本。');
+                }
+            } else {
+                console.log('警告: 无法从响应中获取版本ID');
+            }
+
+            await fsPromises.mkdir(downloadPath, { recursive: true });
+
+            const outputFilePath = path.join(downloadPath, `${appName}_${version}.ipa`);
+            const cacheDir = path.join(downloadPath, 'cache');  // 使用固定的缓存文件夹
+
+            // 创建缓存文件夹
+            await fsPromises.mkdir(cacheDir, { recursive: true });
+
+            // 在下载之前删除缓存文件夹中的文件
+            await clearCache(cacheDir);
+
+            const resp = await fetch(songList0.URL);
+            if (!resp.ok) {
+                throw new Error(`无法获取文件: ${resp.statusText}`);
+            }
+            const fileSize = Number(resp.headers.get('content-length'));
+            const numChunks = Math.ceil(fileSize / CHUNK_SIZE);
+
+            console.log(`文件大小: ${(fileSize / 1024 / 1024).toFixed(2)} MB  下载分块数量: ${numChunks}`);
+
+            let downloaded = 0;
+            const progress = new Array(numChunks).fill(0);
+            const downloadQueue = [];
+
+            let lastTime = Date.now();
+            let lastDownloaded = 0;
+
+            for (let i = 0; i < numChunks; i++) {
+                const start = i * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
+                const tempOutput = path.join(cacheDir, `part${i}`);
+
+                downloadQueue.push(async () => {
+                    await downloadChunk({ url: songList0.URL, start, end, output: tempOutput });
+                    progress[i] = Math.min(CHUNK_SIZE, fileSize - start); // 确保最后一个块大小正确
+                    downloaded = progress.reduce((a, b) => a + b, 0);
+
+                    const currentTime = Date.now();
+                    const elapsedTime = (currentTime - lastTime) / 1000; // seconds
+                    const bytesSinceLast = downloaded - lastDownloaded;
+                    const speed = bytesSinceLast / elapsedTime / 1024 / 1024; // MB/s
+
+                    lastTime = currentTime;
+                    lastDownloaded = downloaded;
+                    process.stdout.write(`下载进度: ${(downloaded / 1024 / 1024).toFixed(2)}MB / ${(fileSize / 1024 / 1024).toFixed(2)}MB (${Math.min(100, Math.round(downloaded / fileSize * 100))}%) - 速度: ${speed.toFixed(2)} MB/s\r`);
+                });
+            }
+
+            for (let i = 0; i < downloadQueue.length; i += MAX_CONCURRENT_DOWNLOADS) {
+                const chunkPromises = downloadQueue.slice(i, i + MAX_CONCURRENT_DOWNLOADS).map(fn => fn());
+                await Promise.all(chunkPromises);
+            }
+
+            console.log('\n合并分块文件...');
+            const finalFile = createWriteStream(outputFilePath);
+            for (let i = 0; i < numChunks; i++) {
+                const tempOutput = path.join(cacheDir, `part${i}`);
+                const tempStream = createReadStream(tempOutput);
+                tempStream.pipe(finalFile, { end: false });
+                await new Promise((resolve) => tempStream.on('end', resolve));
+                await fsPromises.unlink(tempOutput); // 删除临时文件
+            }
+            finalFile.end();
+
+            console.log('授权 IPA');
+            const sigClient = new SignatureClient(songList0, APPLE_ID);
+            await sigClient.loadFile(outputFilePath);
+            await sigClient.appendMetadata().appendSignature();
+            await sigClient.write();
+            console.log('授权完成');
+
+            // 删除缓存文件夹
+            await fsPromises.rmdir(cacheDir);
+            
+            // 返回成功结果和详细信息
+            return {
+                success: true,
+                filePath: outputFilePath,
+                appName: appName,
+                version: version,
+                versionId: versionId,
+                isRequestedVersion: appVerId ? appVerId === versionId : true
+            };
+        } catch (error) {
+            return handleError('DOWNLOAD_FAILED', `下载失败：${error.message}`);
         }
-        console.log(`登录结果: ${user.accountInfo.address.firstName} ${user.accountInfo.address.lastName}`);
-
-        console.log('------查询APP信息------');
-        const app = await Store.download(APPID, appVerId, user); // 第三个参数传递Cookie信息
-        if (app._state !== 'success') {
-            console.log(`查询失败：${app.customerMessage}`);
-            return;
-        }
-        const songList0 = app?.songList[0];
-        console.log(`APP名称： ${songList0.metadata.bundleDisplayName}   版本： ${songList0.metadata.bundleShortVersionString}`);
-
-        await fsPromises.mkdir(downloadPath, { recursive: true });
-
-        const outputFilePath = path.join(downloadPath, `${songList0.metadata.bundleDisplayName}_${songList0.metadata.bundleShortVersionString}.ipa`);
-        const cacheDir = path.join(downloadPath, 'cache');  // 使用固定的缓存文件夹
-
-        // 创建缓存文件夹
-        await fsPromises.mkdir(cacheDir, { recursive: true });
-
-        // 在下载之前删除缓存文件夹中的文件
-        await clearCache(cacheDir);
-
-        const resp = await fetch(songList0.URL);
-        if (!resp.ok) {
-            throw new Error(`无法获取文件: ${resp.statusText}`);
-        }
-        const fileSize = Number(resp.headers.get('content-length'));
-        const numChunks = Math.ceil(fileSize / CHUNK_SIZE);
-
-        console.log(`文件大小: ${(fileSize / 1024 / 1024).toFixed(2)} MB  下载分块数量: ${numChunks}`);
-
-        let downloaded = 0;
-        const progress = new Array(numChunks).fill(0);
-        const downloadQueue = [];
-
-        let lastTime = Date.now();
-        let lastDownloaded = 0;
-
-        for (let i = 0; i < numChunks; i++) {
-            const start = i * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
-            const tempOutput = path.join(cacheDir, `part${i}`);
-
-            downloadQueue.push(async () => {
-                await downloadChunk({ url: songList0.URL, start, end, output: tempOutput });
-                progress[i] = Math.min(CHUNK_SIZE, fileSize - start); // 确保最后一个块大小正确
-                downloaded = progress.reduce((a, b) => a + b, 0);
-
-                const currentTime = Date.now();
-                const elapsedTime = (currentTime - lastTime) / 1000; // seconds
-                const bytesSinceLast = downloaded - lastDownloaded;
-                const speed = bytesSinceLast / elapsedTime / 1024 / 1024; // MB/s
-
-                lastTime = currentTime;
-                lastDownloaded = downloaded;
-                process.stdout.write(`下载进度: ${(downloaded / 1024 / 1024).toFixed(2)}MB / ${(fileSize / 1024 / 1024).toFixed(2)}MB (${Math.min(100, Math.round(downloaded / fileSize * 100))}%) - 速度: ${speed.toFixed(2)} MB/s\r`);
-            });
-        }
-
-        for (let i = 0; i < downloadQueue.length; i += MAX_CONCURRENT_DOWNLOADS) {
-            const chunkPromises = downloadQueue.slice(i, i + MAX_CONCURRENT_DOWNLOADS).map(fn => fn());
-            await Promise.all(chunkPromises);
-        }
-
-        console.log('\n合并分块文件...');
-        const finalFile = createWriteStream(outputFilePath);
-        for (let i = 0; i < numChunks; i++) {
-            const tempOutput = path.join(cacheDir, `part${i}`);
-            const tempStream = createReadStream(tempOutput);
-            tempStream.pipe(finalFile, { end: false });
-            await new Promise((resolve) => tempStream.on('end', resolve));
-            await fsPromises.unlink(tempOutput); // 删除临时文件
-        }
-        finalFile.end();
-
-        console.log('授权 IPA');
-        const sigClient = new SignatureClient(songList0, APPLE_ID);
-        await sigClient.loadFile(outputFilePath);
-        await sigClient.appendMetadata().appendSignature();
-        await sigClient.write();
-        console.log('授权完成');
-
-// 删除缓存文件夹
-        await fsPromises.rmdir(cacheDir);
     }
 }

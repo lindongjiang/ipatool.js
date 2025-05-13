@@ -1,0 +1,99 @@
+/* 添加API限制警告样式 */
+.api-limitation-warning {
+    background-color: #fff3cd;
+    border-left: 4px solid #ffc107;
+    padding: 10px 15px;
+    margin: 15px 0;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.api-limitation-warning p {
+    margin: 0;
+    color: #856404;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.api-limitation-warning strong {
+    font-weight: 600;
+}
+
+/* 美化版本列表显示 */
+.version-item {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    transition: all 0.2s ease;
+}
+
+.version-item:hover {
+    border-color: #007bff;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.current-version {
+    border-left: 4px solid #28a745;
+}
+
+.version-info {
+    padding: 12px 15px;
+    cursor: pointer;
+}
+
+.version-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.version-name {
+    font-weight: 500;
+    font-size: 16px;
+}
+
+.version-date {
+    color: #6c757d;
+    font-size: 14px;
+}
+
+.version-details {
+    display: flex;
+    font-size: 13px;
+    color: #6c757d;
+}
+
+.version-id {
+    margin-right: 15px;
+}
+
+.version-info-note {
+    font-size: 14px;
+    color: #6c757d;
+    margin-top: 15px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 3px;
+}
+
+/* 已验证版本号的样式 */
+.version-verified {
+    border-color: #28a745 !important;
+    background-color: #f0fff4;
+}
+
+.version-verified:hover {
+    border-color: #28a745 !important;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2) !important;
+}
+
+.version-updated {
+    color: #28a745;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 5px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    background-color: #e6f7ea;
+} 
