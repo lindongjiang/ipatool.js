@@ -411,30 +411,64 @@ function updateProgress(percent, text) {
 
 // 显示下载结果
 function showDownloadResult(data) {
-    // 支持两种调用方式：传入整个结果对象或分别传入各个参数
-    let appName, version, downloadLink;
+    elements.appNameResult.textContent = `应用名称: ${data.appName}`;
+    elements.versionResult.textContent = `版本: ${data.version}`;
+    elements.downloadLink.href = data.downloadLink;
     
-    if (typeof data === 'object') {
-        appName = data.appName;
-        version = data.version;
-        downloadLink = data.downloadLink;
-        
-        if (data.fileSize) {
-            elements.fileSizeResult.textContent = `大小: ${formatFileSize(data.fileSize)}`;
-            showElement(elements.fileSizeResult);
-        } else {
-            hideElement(elements.fileSizeResult);
-        }
+    if (data.fileSize) {
+        elements.fileSizeResult.textContent = `大小: ${formatFileSize(data.fileSize)}`;
+        showElement(elements.fileSizeResult);
     } else {
-        // 兼容旧的调用方式
-        appName = arguments[0];
-        version = arguments[1];
-        downloadLink = arguments[2];
+        hideElement(elements.fileSizeResult);
     }
     
-    elements.appNameResult.textContent = `应用名称: ${appName}`;
-    elements.versionResult.textContent = `版本: ${version}`;
-    elements.downloadLink.href = downloadLink;
+    // 如果有OTA链接，添加OTA安装部分
+    const otaContainer = document.getElementById('otaInstallContainer');
+    if (otaContainer) {
+        if (data.otaLink) {
+            // 移除旧内容
+            otaContainer.innerHTML = '';
+            
+            // 创建OTA安装部分
+            const otaSection = document.createElement('div');
+            otaSection.className = 'ota-section';
+            
+            // 标题
+            const heading = document.createElement('h4');
+            heading.textContent = 'iOS设备OTA安装';
+            otaSection.appendChild(heading);
+            
+            // 说明
+            const description = document.createElement('p');
+            description.textContent = '点击下面的链接可直接在iOS设备上安装此应用:';
+            otaSection.appendChild(description);
+            
+            // 安装按钮
+            const otaButton = document.createElement('a');
+            otaButton.href = data.otaLink;
+            otaButton.className = 'ota-button';
+            otaButton.textContent = '点击在iOS设备上安装';
+            otaSection.appendChild(otaButton);
+            
+            // 警告提示
+            const warning = document.createElement('p');
+            warning.className = 'ota-warning';
+            warning.textContent = '注意: 必须在iOS设备上点击此链接才能安装';
+            otaSection.appendChild(warning);
+            
+            // 附加说明
+            const note = document.createElement('p');
+            note.className = 'ota-note';
+            note.textContent = '如果您使用的是Safari浏览器，链接可能会直接触发安装。如果使用其他浏览器，可能需要先复制链接再在Safari中打开。';
+            otaSection.appendChild(note);
+            
+            // 添加OTA安装部分
+            otaContainer.appendChild(otaSection);
+            showElement(otaContainer);
+        } else {
+            hideElement(otaContainer);
+        }
+    }
     
     hideElement(elements.downloadProgress);
     showElement(elements.downloadResult);
@@ -561,6 +595,43 @@ function hideLoading() {
 window.showDownloadResult = showDownloadResult;
 window.showLoading = showLoading;
 window.hideLoading = hideLoading;
+
+// 准备OTA安装
+async function prepareOtaInstall(appleId, appId, appVerId) {
+    try {
+        showLoading('准备OTA安装...');
+        
+        const response = await fetch('/api/prepare-ota', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ appleId, appId, appVerId })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`请求失败: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        hideLoading();
+        
+        if (data.success) {
+            showDownloadResult(data);
+            showToast('已生成OTA安装链接');
+        } else {
+            showToast(`生成OTA安装链接失败: ${data.error}`, 'error');
+        }
+        
+        return data;
+    } catch (error) {
+        hideLoading();
+        showToast(`准备OTA安装失败: ${error.message}`, 'error');
+        console.error('准备OTA安装错误:', error);
+        throw error;
+    }
+}
+
+// 将函数添加到全局作用域
+window.prepareOtaInstall = prepareOtaInstall;
 
 // 初始化
 async function init() {
@@ -842,6 +913,14 @@ async function init() {
         
         if (result.success) {
             showDownloadResult(result);
+            
+            // 尝试准备OTA安装
+            try {
+                await prepareOtaInstall(state.currentAccount.appleId, appId, appVerId);
+            } catch (otaError) {
+                console.error('OTA准备失败，但不影响正常下载:', otaError);
+            }
+            
             showToast('下载完成！');
         } else {
             hideElement(elements.downloadProgress);

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上传IPA文件</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .upload-container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        .file-upload {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            border: 2px dashed #4CAF50;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .file-upload.highlight {
+            background-color: #e8f5e9;
+            border-color: #2E7D32;
+        }
+        
+        .upload-icon {
+            font-size: 48px;
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+        
+        .file-input {
+            position: absolute;
+            width: 0.1px;
+            height: 0.1px;
+            opacity: 0;
+            overflow: hidden;
+            z-index: -1;
+        }
+        
+        .file-label {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 10px 0;
+            transition: background-color 0.3s;
+        }
+        
+        .file-label:hover {
+            background-color: #388E3C;
+        }
+        
+        .selected-file {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .progress-container {
+            width: 100%;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            margin: 15px 0;
+            overflow: hidden;
+            display: none;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .result-container {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background-color: #f5f5f5;
+            display: none;
+        }
+        
+        .result-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #4CAF50;
+        }
+        
+        .result-item {
+            margin-bottom: 8px;
+        }
+        
+        .ota-button {
+            display: inline-block;
+            padding: 10px 15px;
+            margin-top: 10px;
+            background-color: #2196F3;
+            color: white;
+            border-radius: 4px;
+            text-decoration: none;
+            text-align: center;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        
+        .ota-button:hover {
+            background-color: #0b7dda;
+            text-decoration: none;
+        }
+        
+        .qrcode-container {
+            margin-top: 15px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>IPA上传与OTA安装</h1>
+    </header>
+    
+    <main>
+        <div class="upload-container">
+            <h2>上传IPA文件生成OTA链接</h2>
+            <p>选择或拖拽一个IPA文件到下方区域，系统将自动处理并生成OTA安装链接</p>
+            
+            <div id="dropArea" class="file-upload">
+                <div class="upload-icon">📤</div>
+                <p>拖拽IPA文件到这里 或 点击选择文件</p>
+                <input type="file" id="fileInput" class="file-input" accept=".ipa">
+                <label for="fileInput" class="file-label">选择IPA文件</label>
+                <div id="selectedFile" class="selected-file"></div>
+            </div>
+            
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            
+            <button id="uploadButton" class="button primary-button" disabled>上传并生成OTA链接</button>
+            
+            <div id="resultContainer" class="result-container">
+                <div class="result-title">处理结果</div>
+                <div id="resultContent"></div>
+                <div id="otaLinkContainer"></div>
+                <div id="qrcodeContainer" class="qrcode-container"></div>
+            </div>
+        </div>
+    </main>
+    
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <footer>
+        <p>© 2023 IPA下载工具 | <a href="/">返回主页</a></p>
+    </footer>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropArea = document.getElementById('dropArea');
+            const fileInput = document.getElementById('fileInput');
+            const selectedFile = document.getElementById('selectedFile');
+            const uploadButton = document.getElementById('uploadButton');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const resultContainer = document.getElementById('resultContainer');
+            const resultContent = document.getElementById('resultContent');
+            const otaLinkContainer = document.getElementById('otaLinkContainer');
+            const qrcodeContainer = document.getElementById('qrcodeContainer');
+            
+            // 拖拽区域事件监听
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                dropArea.classList.add('highlight');
+            }
+            
+            function unhighlight() {
+                dropArea.classList.remove('highlight');
+            }
+            
+            dropArea.addEventListener('drop', handleDrop, false);
+            
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFiles(files);
+            }
+            
+            fileInput.addEventListener('change', function() {
+                handleFiles(this.files);
+            });
+            
+            function handleFiles(files) {
+                if (files.length > 0) {
+                    const file = files[0];
+                    if (file.name.endsWith('.ipa')) {
+                        selectedFile.textContent = `已选择: ${file.name} (${formatFileSize(file.size)})`;
+                        uploadButton.disabled = false;
+                    } else {
+                        showToast('请选择有效的IPA文件', 'error');
+                        selectedFile.textContent = '';
+                        uploadButton.disabled = true;
+                    }
+                }
+            }
+            
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+            
+            uploadButton.addEventListener('click', uploadFile);
+            
+            async function uploadFile() {
+                if (!fileInput.files.length) {
+                    showToast('请先选择IPA文件', 'error');
+                    return;
+                }
+                
+                const file = fileInput.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                uploadButton.disabled = true;
+                progressContainer.style.display = 'block';
+                resultContainer.style.display = 'none';
+                
+                try {
+                    // 上传文件
+                    const uploadResponse = await fetch('/api/upload-ipa', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    updateProgress(50);
+                    
+                    if (!uploadResponse.ok) {
+                        throw new Error(`上传失败: ${uploadResponse.statusText}`);
+                    }
+                    
+                    const uploadResult = await uploadResponse.json();
+                    
+                    if (!uploadResult.success) {
+                        throw new Error(uploadResult.error || '上传过程中出错');
+                    }
+                    
+                    updateProgress(75);
+                    
+                    // 生成OTA链接
+                    const otaResponse = await fetch('/api/generate-ota-for-ipa', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ ipaPath: uploadResult.filePath })
+                    });
+                    
+                    if (!otaResponse.ok) {
+                        throw new Error(`生成OTA链接失败: ${otaResponse.statusText}`);
+                    }
+                    
+                    const otaResult = await otaResponse.json();
+                    
+                    updateProgress(100);
+                    showToast('处理成功！', 'success');
+                    
+                    displayResult(otaResult);
+                } catch (error) {
+                    console.error('处理失败:', error);
+                    showToast(`处理失败: ${error.message}`, 'error');
+                    updateProgress(0);
+                } finally {
+                    uploadButton.disabled = false;
+                }
+            }
+            
+            function updateProgress(percent) {
+                progressBar.style.width = `${percent}%`;
+            }
+            
+            function displayResult(result) {
+                resultContainer.style.display = 'block';
+                
+                let html = `
+                    <div class="result-item"><strong>应用名称:</strong> ${result.appInfo.name}</div>
+                    <div class="result-item"><strong>Bundle ID:</strong> ${result.appInfo.bundleId}</div>
+                    <div class="result-item"><strong>版本:</strong> ${result.appInfo.version} (Build ${result.appInfo.buildVersion})</div>
+                `;
+                
+                resultContent.innerHTML = html;
+                
+                // OTA链接
+                if (result.otaLink) {
+                    otaLinkContainer.innerHTML = `
+                        <p>点击下面的链接在iOS设备上安装:</p>
+                        <a href="${result.otaLink}" class="ota-button">点击安装应用</a>
+                        <p class="helper-text">注意: 必须在iOS设备上点击才能安装</p>
+                    `;
+                }
+                
+                // 可以加入二维码功能，但需要额外的库
+            }
+            
+            function showToast(message, type = 'info', duration = 3000) {
+                const toastContainer = document.getElementById('toastContainer');
+                
+                const toast = document.createElement('div');
+                toast.className = `toast toast-${type}`;
+                toast.textContent = message;
+                
+                toastContainer.appendChild(toast);
+                
+                // 自动消失
+                setTimeout(() => {
+                    toast.classList.add('hide');
+                    setTimeout(() => {
+                        toast.remove();
+                    }, 300);
+                }, duration);
+            }
+        });
+    </script>
+</body>
+</html> 

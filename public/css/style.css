@@ -667,4 +667,57 @@ button:disabled {
 
 @keyframes spin {
     to { transform: rotate(360deg); }
+}
+
+/* OTA安装相关样式 */
+.ota-button {
+    display: inline-block;
+    padding: 10px 15px;
+    margin-top: 10px;
+    background-color: #2196F3;
+    color: white;
+    border-radius: 4px;
+    text-decoration: none;
+    text-align: center;
+    font-weight: bold;
+    transition: background-color 0.3s;
+}
+
+.ota-button:hover {
+    background-color: #0b7dda;
+    text-decoration: none;
+}
+
+.ota-section {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+
+.ota-section h4 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.ota-warning {
+    color: #d32f2f;
+    font-size: 0.9em;
+    margin-top: 5px;
+}
+
+.ota-note {
+    font-size: 0.85em;
+    color: #666;
+    margin-top: 8px;
+}
+
+.qrcode-container {
+    margin-top: 15px;
+    padding: 10px;
+    border: 1px solid #eee;
+    display: inline-block;
+    background: white;
 } 

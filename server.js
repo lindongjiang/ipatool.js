@@ -1,13 +1,16 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import cors from 'cors';
-import { promises as fs } from 'fs';
+import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { IPATool } from './src/ipa.js';
 import { Store } from './src/client.js';
 import fetch from 'node-fetch';
 import plist from 'plist';
+import otaService from './src/ota/ota-service.js';
+// 文件上传中间件
+import multer from 'multer';
 
 // 设置 __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -16,10 +19,44 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// 配置文件上传存储
+const storage = multer.diskStorage({
+  destination: function(req, file, cb) {
+    cb(null, path.join(__dirname, 'downloads'));
+  },
+  filename: function(req, file, cb) {
+    // 使用时间戳和原始文件名
+    cb(null, `${Date.now()}-${file.originalname}`);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  fileFilter: function(req, file, cb) {
+    // 仅接受.ipa文件
+    if (file.originalname.endsWith('.ipa')) {
+      cb(null, true);
+    } else {
+      cb(new Error('仅支持上传.ipa文件'));
+    }
+  },
+  limits: {
+    fileSize: 1024 * 1024 * 500 // 限制500MB
+  }
+});
+
 // 中间件
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// 确保正确的MIME类型
+app.use((req, res, next) => {
+  if (req.path.endsWith('.plist')) {
+    res.type('application/xml');
+  }
+  next();
+});
 
 // 存储用户账号信息
 let userAccounts = {};
@@ -885,8 +922,133 @@ app.post('/api/download', async (req, res) => {
   }
 });
 
-// 下载文件路由
+// 准备OTA安装
+app.post('/api/prepare-ota', async (req, res) => {
+  const { appleId, appId, appVerId } = req.body;
+  
+  if (!appleId || !appId) {
+    return res.status(400).json({ error: '需要提供 Apple ID 和应用 ID' });
+  }
+  
+  if (!userAccounts[appleId] || !userAccounts[appleId].authenticated) {
+    return res.status(401).json({ error: '账号未认证，请先登录' });
+  }
+  
+  const ipaTool = new IPATool();
+  
+  try {
+    console.log(`准备OTA安装 - APPID: ${appId}, appVerId: ${appVerId || '未指定（最新版本）'}`);
+    
+    // 先下载IPA文件
+    const result = await ipaTool.downipa({
+      path: './downloads',
+      APPLE_ID: appleId,
+      PASSWORD: userAccounts[appleId].password,
+      CODE: '',
+      APPID: appId,
+      appVerId: appVerId || '',
+      onError: (type, message) => {
+        console.error(`下载错误: ${type} - ${message}`);
+        return false; // 中止执行
+      }
+    });
+    
+    if (!result || !result.success) {
+      return res.status(500).json({ 
+        error: result?.error || '下载失败', 
+        errorType: result?.errorType || 'UNKNOWN_ERROR',
+        details: result?.details || '未知错误'
+      });
+    }
+    
+    // 确定服务器基础URL
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers.host;
+    const baseUrl = `${protocol}://${host}`;
+    
+    // 处理IPA文件生成OTA链接
+    console.log(`处理下载的IPA文件生成OTA链接: ${result.filePath}`);
+    
+    const otaResult = await otaService.processIPA(result.filePath, baseUrl);
+    
+    // 构建文件下载链接 (直接下载)
+    const downloadLink = `/downloads/${path.basename(result.filePath)}`;
+    const stats = await fs.stat(result.filePath);
+    
+    return res.json({
+      success: true,
+      appName: result.appName,
+      version: result.version,
+      versionId: result.versionId,
+      fileSize: stats.size,
+      isRequestedVersion: result.isRequestedVersion,
+      downloadLink: downloadLink,
+      // OTA相关信息
+      otaLink: otaResult.otaLink,
+      manifestUrl: otaResult.urls.manifest,
+      iconUrl: otaResult.urls.icon,
+      bundleId: otaResult.appInfo.bundleId
+    });
+  } catch (error) {
+    console.error('OTA准备错误:', error);
+    return res.status(500).json({ error: '准备OTA安装过程中出错', details: error.message });
+  }
+});
+
+// 使用现有下载的IPA文件生成OTA链接
+app.post('/api/generate-ota-for-ipa', async (req, res) => {
+  const { ipaPath } = req.body;
+  
+  if (!ipaPath) {
+    return res.status(400).json({ error: '需要提供 IPA 文件路径' });
+  }
+  
+  if (!await fs.pathExists(ipaPath)) {
+    return res.status(404).json({ error: 'IPA 文件不存在' });
+  }
+  
+  try {
+    // 确定服务器基础URL
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers.host;
+    const baseUrl = `${protocol}://${host}`;
+    
+    // 处理IPA文件
+    const result = await otaService.processIPA(ipaPath, baseUrl);
+    
+    return res.json(result);
+  } catch (error) {
+    console.error('生成OTA链接失败:', error);
+    return res.status(500).json({ error: '处理IPA文件失败', details: error.message });
+  }
+});
+
+// 处理文件上传的API路由
+app.post('/api/upload-ipa', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: '未上传文件或文件类型不正确' });
+    }
+
+    console.log(`文件上传成功: ${req.file.filename}, 保存至: ${req.file.path}`);
+
+    // 返回文件路径，用于后续处理
+    return res.json({
+      success: true,
+      filename: req.file.filename,
+      filePath: req.file.path,
+      size: req.file.size
+    });
+  } catch (error) {
+    console.error('文件上传错误:', error);
+    return res.status(500).json({ success: false, error: '文件上传处理失败', details: error.message });
+  }
+});
+
+// 提供静态文件
 app.use('/downloads', express.static(path.join(__dirname, 'downloads')));
+app.use('/manifests', express.static(path.join(__dirname, 'public', 'manifests')));
+app.use('/icons', express.static(path.join(__dirname, 'public', 'icons')));
 
 // 提供前端页面
 app.get('*', (req, res) => {
